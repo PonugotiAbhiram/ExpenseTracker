@@ -10,14 +10,50 @@ connectDB();
 
 const app = express();
 
-// ✅ ADD CORS HERE (VERY IMPORTANT)
-app.use(cors({
-  origin: [
-    "http://localhost:5173",
-    process.env.FRONTEND_URL
-  ].filter(Boolean), // Filter out undefined if FRONTEND_URL is not set
+// ✅ CORS Configuration
+const allowedOrigins = [
+  "http://localhost:5173",
+  "https://expense-tracker-frontend-umber-three.vercel.app",
+  process.env.FRONTEND_URL
+].filter(Boolean);
+
+const corsOptions = {
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true
-}));
+};
+
+// 1. Standard CORS middleware
+app.use(cors(corsOptions));
+
+// 2. Handle preflight (OPTIONS) requests
+app.options("*", cors(corsOptions));
+
+// 3. Fallback middleware for manual CORS headers
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (allowedOrigins.includes(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+  }
+  
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Origin, X-Requested-With, Content-Type, Accept, Authorization"
+  );
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  res.setHeader("Access-Control-Allow-Credentials", "true");
+
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
+  }
+
+  next();
+});
 
 app.use(express.json());
 
