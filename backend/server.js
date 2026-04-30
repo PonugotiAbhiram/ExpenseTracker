@@ -12,7 +12,7 @@ const app = express();
 
 // ✅ CORS Configuration
 app.use(cors({
-  origin: "https://expense-tracker-frontend-umber-three.vercel.app",
+  origin: ["http://localhost:5173","https://expense-tracker-frontend-umber-three.vercel.app"],
   credentials: true
 }));
 

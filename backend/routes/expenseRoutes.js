@@ -17,7 +17,6 @@ const {
 // Validation rules
 const expenseRules = [
   body("amount").isFloat({ gt: 0 }).withMessage("Amount must be positive"),
-  body("category").notEmpty().withMessage("Category is required"),
 ];
 
 // Routes

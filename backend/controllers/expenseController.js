@@ -1,4 +1,5 @@
 const Expense = require("../models/Expense");
+const autoCategorize = require("../utils/autoCategorize");
 const { validationResult } = require("express-validator");
 const mongoose = require("mongoose");
 
@@ -22,6 +23,10 @@ const addExpense = async (req, res) => {
 
   try {
     const { user: _user, ...expenseData } = req.body;
+
+    if (!expenseData.category) {
+      expenseData.category = autoCategorize(expenseData.description);
+    }
 
     const expense = await Expense.create({
       ...expenseData,
@@ -52,6 +57,10 @@ const updateExpense = async (req, res) => {
 
   // Prevent overwriting the owner
   const { user: _user, ...safeUpdate } = req.body;
+
+  if (!safeUpdate.category && safeUpdate.description) {
+    safeUpdate.category = autoCategorize(safeUpdate.description);
+  }
 
   try {
     const updatedExpense = await Expense.findOneAndUpdate(

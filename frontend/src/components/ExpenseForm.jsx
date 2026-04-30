@@ -1,6 +1,7 @@
 // src/components/ExpenseForm.jsx
 import React, { useState, useEffect } from "react";
 import { EXPENSE_CATEGORIES, PAYMENT_METHODS } from "../utils/constants";
+import { autoCategorize } from "../utils/autoCategorize";
 
 const EMPTY_FORM = {
   description:   "",
@@ -16,6 +17,8 @@ const ExpenseForm = ({ initialData = null, onSubmit, onClose, isLoading }) => {
   const isEditing = Boolean(initialData);
   const [form,   setForm]   = useState(EMPTY_FORM);
   const [errors, setErrors] = useState({});
+  const [autoDetected, setAutoDetected] = useState(false);
+  const [isCategoryManuallySet, setIsCategoryManuallySet] = useState(false);
 
   useEffect(() => {
     if (initialData) {
@@ -30,10 +33,30 @@ const ExpenseForm = ({ initialData = null, onSubmit, onClose, isLoading }) => {
         tags:  Array.isArray(initialData.tags) ? initialData.tags.join(", ") : (initialData.tags || ""),
         notes: initialData.notes || "",
       });
+      setIsCategoryManuallySet(Boolean(initialData.category));
     } else {
       setForm(EMPTY_FORM);
+      setIsCategoryManuallySet(false);
     }
+    setAutoDetected(false);
   }, [initialData]);
+
+  // Dynamic Auto-Categorization
+  useEffect(() => {
+    if (!form.description) {
+      setIsCategoryManuallySet(false);
+      setAutoDetected(false);
+      return;
+    }
+
+    if (!isCategoryManuallySet) {
+      const suggestedCategory = autoCategorize(form.description);
+      if (suggestedCategory && suggestedCategory !== form.category) {
+        setForm((prev) => ({ ...prev, category: suggestedCategory }));
+        setAutoDetected(true);
+      }
+    }
+  }, [form.description, isCategoryManuallySet, form.category]);
 
   const validate = () => {
     const e = {};
@@ -46,6 +69,12 @@ const ExpenseForm = ({ initialData = null, onSubmit, onClose, isLoading }) => {
 
   const handleChange = (e) => {
     const { name, value } = e.target;
+    
+    if (name === "category") {
+      setIsCategoryManuallySet(true);
+      setAutoDetected(false);
+    }
+
     setForm((prev) => ({ ...prev, [name]: value }));
     if (errors[name]) setErrors((prev) => ({ ...prev, [name]: "" }));
   };
@@ -57,7 +86,7 @@ const ExpenseForm = ({ initialData = null, onSubmit, onClose, isLoading }) => {
     await onSubmit({
       description:   form.description.trim(),
       amount:        parseFloat(form.amount),
-      category:      form.category,
+      category:      form.category || "Other", // Fallback for safety
       paymentMethod: form.paymentMethod || undefined,
       date:          form.date,
       tags:          form.tags ? form.tags.split(",").map((t) => t.trim()).filter(Boolean) : [],
@@ -135,6 +164,11 @@ const ExpenseForm = ({ initialData = null, onSubmit, onClose, isLoading }) => {
                 <option value="" disabled>Select category</option>
                 {EXPENSE_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
               </select>
+              {autoDetected && !errors.category && (
+                <span style={{ fontSize: "0.75rem", color: "var(--primary-color)", marginTop: "4px", display: "block" }}>
+                  ✨ Auto-detected category
+                </span>
+              )}
               {errors.category && <span className="field-error">{errors.category}</span>}
             </div>
 
