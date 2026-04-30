@@ -80,6 +80,15 @@ const expenseSchema = new mongoose.Schema(
       default: false,
     },
 
+    recurrenceType: {
+      type: String,
+      enum: ["daily", "weekly", "monthly"],
+    },
+
+    nextExecutionDate: {
+      type: Date,
+    },
+
     notes: {
       type: String,
       trim: true,

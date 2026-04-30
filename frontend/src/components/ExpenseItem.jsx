@@ -51,6 +51,11 @@ const ExpenseItem = ({ expense, onEdit, onDelete, selected = false, onSelect, sh
             {expense.paymentMethod && (
               <span className="payment-badge">{expense.paymentMethod}</span>
             )}
+            {expense.isRecurring && (
+              <span style={{ display: "inline-flex", alignItems: "center", gap: "2px", padding: "2px 6px", fontSize: "0.7rem", borderRadius: "12px", backgroundColor: "var(--bg-hover)", color: "var(--text-muted)", fontWeight: 500 }}>
+                🔁 Recurring
+              </span>
+            )}
             {tags.slice(0, 2).map((tag) => (
               <span key={tag} className="tag-chip">{tag}</span>
             ))}

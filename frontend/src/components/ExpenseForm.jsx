@@ -11,6 +11,8 @@ const EMPTY_FORM = {
   date:          new Date().toISOString().slice(0, 10),
   tags:          "",
   notes:         "",
+  isRecurring:   false,
+  recurrenceType: "monthly",
 };
 
 const ExpenseForm = ({ initialData = null, onSubmit, onClose, isLoading }) => {
@@ -32,6 +34,8 @@ const ExpenseForm = ({ initialData = null, onSubmit, onClose, isLoading }) => {
           : EMPTY_FORM.date,
         tags:  Array.isArray(initialData.tags) ? initialData.tags.join(", ") : (initialData.tags || ""),
         notes: initialData.notes || "",
+        isRecurring: initialData.isRecurring || false,
+        recurrenceType: initialData.recurrenceType || "monthly",
       });
       setIsCategoryManuallySet(Boolean(initialData.category));
     } else {
@@ -64,18 +68,20 @@ const ExpenseForm = ({ initialData = null, onSubmit, onClose, isLoading }) => {
     if (!form.amount || isNaN(form.amount) || Number(form.amount) <= 0) e.amount = "Enter a valid positive amount";
     if (!form.category)                                         e.category = "Please select a category";
     if (!form.date)                                             e.date     = "Date is required";
+    if (form.isRecurring && !form.recurrenceType)               e.recurrenceType = "Select recurrence type";
     return e;
   };
 
   const handleChange = (e) => {
-    const { name, value } = e.target;
+    const { name, value, type, checked } = e.target;
+    const val = type === "checkbox" ? checked : value;
     
     if (name === "category") {
       setIsCategoryManuallySet(true);
       setAutoDetected(false);
     }
 
-    setForm((prev) => ({ ...prev, [name]: value }));
+    setForm((prev) => ({ ...prev, [name]: val }));
     if (errors[name]) setErrors((prev) => ({ ...prev, [name]: "" }));
   };
 
@@ -91,6 +97,8 @@ const ExpenseForm = ({ initialData = null, onSubmit, onClose, isLoading }) => {
       date:          form.date,
       tags:          form.tags ? form.tags.split(",").map((t) => t.trim()).filter(Boolean) : [],
       notes:         form.notes.trim() || undefined,
+      isRecurring:   form.isRecurring,
+      recurrenceType: form.isRecurring ? form.recurrenceType : undefined,
     });
   };
 
@@ -209,6 +217,40 @@ const ExpenseForm = ({ initialData = null, onSubmit, onClose, isLoading }) => {
               value={form.notes} onChange={handleChange}
               disabled={isLoading}
             />
+          </div>
+
+          {/* Recurring Options */}
+          <div className="form-field" style={{ display: "flex", flexDirection: "column", gap: "8px", marginTop: "8px", marginBottom: "16px" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer", fontWeight: "normal" }}>
+              <input
+                type="checkbox"
+                name="isRecurring"
+                checked={form.isRecurring}
+                onChange={handleChange}
+                disabled={isLoading}
+                style={{ width: "16px", height: "16px", accentColor: "var(--primary-color)" }}
+              />
+              Make this a recurring expense
+            </label>
+
+            {form.isRecurring && (
+              <div style={{ marginLeft: "24px", display: "flex", flexDirection: "column", gap: "4px" }}>
+                <label htmlFor="ef-recurrenceType" style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Recurs every</label>
+                <select
+                  id="ef-recurrenceType"
+                  name="recurrenceType"
+                  value={form.recurrenceType}
+                  onChange={handleChange}
+                  disabled={isLoading}
+                  className={errors.recurrenceType ? "input-error" : ""}
+                >
+                  <option value="daily">Daily</option>
+                  <option value="weekly">Weekly</option>
+                  <option value="monthly">Monthly</option>
+                </select>
+                {errors.recurrenceType && <span className="field-error">{errors.recurrenceType}</span>}
+              </div>
+            )}
           </div>
 
           <div className="modal-footer">

@@ -13,6 +13,14 @@ const sendSuccess = (res, status, data) =>
 
 const isValidObjectId = (id) => mongoose.Types.ObjectId.isValid(id);
 
+const calculateNextDate = (date, type) => {
+  const d = new Date(date);
+  if (type === "daily") d.setDate(d.getDate() + 1);
+  if (type === "weekly") d.setDate(d.getDate() + 7);
+  if (type === "monthly") d.setMonth(d.getMonth() + 1);
+  return d;
+};
+
 // ─── Add Expense ──────────────────────────────────────────────────────────────
 
 const addExpense = async (req, res) => {
@@ -26,6 +34,10 @@ const addExpense = async (req, res) => {
 
     if (!expenseData.category) {
       expenseData.category = autoCategorize(expenseData.description);
+    }
+
+    if (expenseData.isRecurring && expenseData.recurrenceType) {
+      expenseData.nextExecutionDate = calculateNextDate(expenseData.date || new Date(), expenseData.recurrenceType);
     }
 
     const expense = await Expense.create({
@@ -62,6 +74,13 @@ const updateExpense = async (req, res) => {
     safeUpdate.category = autoCategorize(safeUpdate.description);
   }
 
+  if (safeUpdate.isRecurring && safeUpdate.recurrenceType) {
+    safeUpdate.nextExecutionDate = calculateNextDate(safeUpdate.date || new Date(), safeUpdate.recurrenceType);
+  } else if (safeUpdate.isRecurring === false) {
+    safeUpdate.nextExecutionDate = null;
+    safeUpdate.recurrenceType = null;
+  }
+
   try {
     const updatedExpense = await Expense.findOneAndUpdate(
       { _id: req.params.id, user: req.user._id }, // ownership check
@@ -87,6 +106,37 @@ const updateExpense = async (req, res) => {
 
 const getExpenses = async (req, res) => {
   try {
+    // ─── Handle Recurring Expenses Generation ───
+    const now = new Date();
+    const recurringExpenses = await Expense.find({
+      user: req.user._id,
+      isRecurring: true,
+      nextExecutionDate: { $lte: now }
+    });
+
+    for (const exp of recurringExpenses) {
+      let currentDate = new Date(exp.nextExecutionDate);
+      
+      while (currentDate <= now) {
+        const clonedData = exp.toObject();
+        delete clonedData._id;
+        delete clonedData.__v;
+        delete clonedData.createdAt;
+        delete clonedData.updatedAt;
+        
+        clonedData.date = currentDate;
+        clonedData.isRecurring = false; // Prevent children from duplicating
+        clonedData.nextExecutionDate = null;
+        clonedData.recurrenceType = null;
+        
+        await Expense.create(clonedData);
+        currentDate = calculateNextDate(currentDate, exp.recurrenceType);
+      }
+      
+      await Expense.findByIdAndUpdate(exp._id, { nextExecutionDate: currentDate });
+    }
+    // ────────────────────────────────────────────
+
     const { category, paymentMethod, limit = 20, page = 1 } = req.query;
 
     const limitNum = Math.min(Math.max(parseInt(limit) || 20, 1), 100); // clamp: 1–100
