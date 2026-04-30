@@ -1,9 +1,10 @@
 const express = require("express");
 const dotenv = require("dotenv");
-const cors = require("cors");   // ✅ ADD THIS
+const cors = require("cors");
 const connectDB = require("./config/db");
 const expenseRoutes = require("./routes/expenseRoutes");
-const authRoutes = require("./routes/authRoutes");
+const authRoutes    = require("./routes/authRoutes");
+const budgetRoutes  = require("./routes/budgetRoutes");
 
 dotenv.config();
 connectDB();
@@ -19,7 +20,8 @@ app.use(cors({
 app.use(express.json());
 
 app.use("/api/expenses", expenseRoutes);
-app.use("/api/auth", authRoutes);
+app.use("/api/auth",     authRoutes);
+app.use("/api/budgets",  budgetRoutes);
 
 app.get("/", (req, res) => {
   res.send("API is running...");

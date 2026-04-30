@@ -1,7 +1,8 @@
-// src/components/ExpenseForm.jsx
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { EXPENSE_CATEGORIES, PAYMENT_METHODS } from "../utils/constants";
 import { autoCategorize } from "../utils/autoCategorize";
+import { getBudgetAnalysis } from "../api/budgetApi";
+import { formatCurrency } from "../utils/formatDate";
 
 const EMPTY_FORM = {
   description:   "",
@@ -21,6 +22,10 @@ const ExpenseForm = ({ initialData = null, onSubmit, onClose, isLoading }) => {
   const [errors, setErrors] = useState({});
   const [autoDetected, setAutoDetected] = useState(false);
   const [isCategoryManuallySet, setIsCategoryManuallySet] = useState(false);
+  
+  // ── Budget Soft-Limits State ──
+  const [budgetData, setBudgetData] = useState(null);
+  const [budgetWarning, setBudgetWarning] = useState(null);
 
   useEffect(() => {
     if (initialData) {
@@ -61,6 +66,62 @@ const ExpenseForm = ({ initialData = null, onSubmit, onClose, isLoading }) => {
       }
     }
   }, [form.description, isCategoryManuallySet, form.category]);
+
+  // Fetch budget data when month changes
+  const [lastMonthYear, setLastMonthYear] = useState(null);
+  useEffect(() => {
+    if (!form.date) return;
+    const d = new Date(form.date);
+    const m = d.getMonth() + 1;
+    const y = d.getFullYear();
+    const key = `${m}-${y}`;
+    if (key !== lastMonthYear) {
+      setLastMonthYear(key);
+      getBudgetAnalysis(m, y).then(setBudgetData).catch(() => {});
+    }
+  }, [form.date, lastMonthYear]);
+
+  // Compute live budget warnings
+  useEffect(() => {
+    if (!budgetData || !form.category || !form.amount || isNaN(form.amount)) {
+      setBudgetWarning(null);
+      return;
+    }
+
+    const amt = Number(form.amount);
+    // Ignore current expense amount if editing
+    const currentTxAmt = isEditing ? Number(initialData.amount || 0) : 0;
+    const netAdd = amt - currentTxAmt;
+
+    if (netAdd <= 0) {
+      setBudgetWarning(null);
+      return;
+    }
+
+    // Check category limit
+    const catBudget = budgetData.categories?.find(c => c.category === form.category);
+    if (catBudget && (catBudget.spent + netAdd > catBudget.limit)) {
+      const excess = (catBudget.spent + netAdd) - catBudget.limit;
+      setBudgetWarning({
+        type: "category",
+        msg: `⚠ This will exceed your ${form.category} budget by ${formatCurrency(excess)}`
+      });
+      return;
+    }
+
+    // Check overall limit
+    const overall = budgetData.overall;
+    if (overall && (overall.spent + netAdd > overall.limit)) {
+      const excess = (overall.spent + netAdd) - overall.limit;
+      setBudgetWarning({
+        type: "overall",
+        msg: `⚠ This will exceed your overall monthly budget by ${formatCurrency(excess)}`
+      });
+      return;
+    }
+
+    setBudgetWarning(null);
+  }, [form.category, form.amount, budgetData, isEditing, initialData]);
 
   const validate = () => {
     const e = {};
@@ -252,6 +313,24 @@ const ExpenseForm = ({ initialData = null, onSubmit, onClose, isLoading }) => {
               </div>
             )}
           </div>
+
+          {budgetWarning && (
+            <div style={{
+              margin: "0 0 16px 0",
+              padding: "10px 14px",
+              background: "rgba(245, 158, 11, 0.1)",
+              borderLeft: "3px solid #f59e0b",
+              borderRadius: "0 6px 6px 0",
+              color: "#d97706",
+              fontSize: "0.85rem",
+              display: "flex",
+              alignItems: "center",
+              gap: "10px",
+            }}>
+              <span style={{ fontSize: "1.2rem", lineHeight: 1 }}>💡</span>
+              <span>{budgetWarning.msg}</span>
+            </div>
+          )}
 
           <div className="modal-footer">
             <button type="button" className="btn-secondary" onClick={onClose} disabled={isLoading}>

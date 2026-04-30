@@ -1,5 +1,5 @@
 // src/components/ExpenseList.jsx
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { getExpenses, deleteExpense, createExpense, updateExpense } from "../api/expenseApi";
 import { EXPENSE_CATEGORIES, ITEMS_PER_PAGE, PAYMENT_METHODS } from "../utils/constants";
 import { toast } from "../utils/toast";
@@ -13,6 +13,11 @@ const SortIcon = ({ field, sort }) => {
   return <span className="sort-icon sort-icon--active">{sort.dir === "asc" ? "↑" : "↓"}</span>;
 };
 
+const EMPTY_FILTERS = {
+  search: "", category: "", paymentMethod: "",
+  startDate: "", endDate: "", minAmount: "", maxAmount: "",
+};
+
 const ExpenseList = () => {
   // ── Data state ────────────────────────────────────────────
   const [expenses,    setExpenses]    = useState([]);
@@ -21,30 +26,54 @@ const ExpenseList = () => {
   const [currentPage, setCurrentPage] = useState(1);
 
   // ── UI state ──────────────────────────────────────────────
-  const [filters,     setFilters]     = useState({ category: "", search: "", paymentMethod: "" });
-  const [sort,        setSort]        = useState({ field: "date", dir: "desc" });
-  const [isLoading,   setIsLoading]   = useState(false);
-  const [formLoading, setFormLoading] = useState(false);
+  const [filters,       setFilters]       = useState(EMPTY_FILTERS);
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [sort,          setSort]          = useState({ field: "date", dir: "desc" });
+  const [isLoading,     setIsLoading]     = useState(false);
+  const [formLoading,   setFormLoading]   = useState(false);
+  const [showAdvanced,  setShowAdvanced]  = useState(false);
 
   // ── Form / modal state ────────────────────────────────────
   const [showForm,    setShowForm]    = useState(false);
   const [editTarget,  setEditTarget]  = useState(null);
 
   // ── Multi-select ──────────────────────────────────────────
-  const [selected,    setSelected]    = useState(new Set());
+  const [selected,     setSelected]    = useState(new Set());
 
   // ── Confirm modal ─────────────────────────────────────────
-  const [confirmState, setConfirmState] = useState(null); // { type: "single"|"bulk", id? }
+  const [confirmState, setConfirmState] = useState(null);
 
-  // ── Fetch ─────────────────────────────────────────────────
+  // ── Debounce search 300ms ─────────────────────────────────
+  const searchTimer = useRef(null);
+  useEffect(() => {
+    clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => {
+      setDebouncedSearch(filters.search);
+      setCurrentPage(1);
+    }, 300);
+    return () => clearTimeout(searchTimer.current);
+  }, [filters.search]);
+
+  // ── Active filter count (for badge on filter button) ──────
+  const activeFilterCount = useMemo(() => {
+    const { search, ...rest } = filters;
+    return Object.values(rest).filter(Boolean).length + (debouncedSearch ? 1 : 0);
+  }, [filters, debouncedSearch]);
+
+  // ── Fetch (server-side filtering) ─────────────────────────
   const fetchExpenses = useCallback(async () => {
     setIsLoading(true);
     try {
       const params = {
         page:  currentPage,
         limit: ITEMS_PER_PAGE,
-        ...(filters.category && { category: filters.category }),
+        ...(debouncedSearch       && { search:        debouncedSearch }),
+        ...(filters.category      && { category:      filters.category }),
         ...(filters.paymentMethod && { paymentMethod: filters.paymentMethod }),
+        ...(filters.startDate     && { startDate:     filters.startDate }),
+        ...(filters.endDate       && { endDate:       filters.endDate }),
+        ...(filters.minAmount     && { minAmount:     filters.minAmount }),
+        ...(filters.maxAmount     && { maxAmount:     filters.maxAmount }),
       };
       const data = await getExpenses(params);
       setExpenses(data.expenses);
@@ -55,46 +84,40 @@ const ExpenseList = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [currentPage, filters.category, filters.paymentMethod]);
+  }, [
+    currentPage, debouncedSearch,
+    filters.category, filters.paymentMethod,
+    filters.startDate, filters.endDate,
+    filters.minAmount, filters.maxAmount,
+  ]);
 
   useEffect(() => { fetchExpenses(); }, [fetchExpenses]);
-
-  // Clear selection when page changes
   useEffect(() => { setSelected(new Set()); }, [expenses]);
 
-  // ── Client-side search + sort ─────────────────────────────
+  // ── Client-side sort only (data is already filtered on server) ──
   const displayedExpenses = useMemo(() => {
-    let list = [...expenses];
-
-    // Search filter (client-side on current page)
-    if (filters.search) {
-      const q = filters.search.toLowerCase();
-      list = list.filter(
-        (e) =>
-          e.description?.toLowerCase().includes(q) ||
-          e.category?.toLowerCase().includes(q) ||
-          e.paymentMethod?.toLowerCase().includes(q)
-      );
-    }
-
-    // Sort
+    const list = [...expenses];
     list.sort((a, b) => {
       let av = a[sort.field], bv = b[sort.field];
       if (sort.field === "amount") { av = Number(av); bv = Number(bv); }
       if (sort.field === "date")   { av = new Date(av); bv = new Date(bv); }
       if (av < bv) return sort.dir === "asc" ? -1 : 1;
-      if (av > bv) return sort.dir === "asc" ? 1  : -1;
+      if (av > bv) return sort.dir === "asc" ?  1 : -1;
       return 0;
     });
-
     return list;
-  }, [expenses, filters.search, sort]);
+  }, [expenses, sort]);
 
   // ── Handlers ──────────────────────────────────────────────
   const handleFilterChange = (e) => {
     const { name, value } = e.target;
     setFilters((prev) => ({ ...prev, [name]: value }));
-    if (name === "category" || name === "paymentMethod") setCurrentPage(1);
+    if (name !== "search") setCurrentPage(1);
+  };
+
+  const handleClearFilters = () => {
+    setFilters(EMPTY_FILTERS);
+    setCurrentPage(1);
   };
 
   const handleSort = (field) => {
@@ -107,8 +130,9 @@ const ExpenseList = () => {
   const handleCreate = async (data) => {
     setFormLoading(true);
     try {
-      await createExpense(data);
-      toast.success("Expense added successfully!");
+      const res = await createExpense(data);
+      const isOver = res?.data?.isOverBudget || res?.data?.isCategoryExceeded;
+      toast.success(isOver ? "Expense added (over budget) ⚠️" : "Expense added successfully!");
       setShowForm(false);
       setCurrentPage(1);
       await fetchExpenses();
@@ -134,7 +158,6 @@ const ExpenseList = () => {
     }
   };
 
-  // Single delete — confirmed
   const handleDeleteConfirmed = async () => {
     try {
       await deleteExpense(confirmState.id);
@@ -147,7 +170,6 @@ const ExpenseList = () => {
     }
   };
 
-  // Bulk delete — confirmed
   const handleBulkDeleteConfirmed = async () => {
     try {
       await Promise.all([...selected].map((id) => deleteExpense(id)));
@@ -160,10 +182,9 @@ const ExpenseList = () => {
     }
   };
 
-  const openEdit = (expense) => { setEditTarget(expense); setShowForm(true); };
-  const closeForm = () => { setShowForm(false); setEditTarget(null); };
+  const openEdit  = (expense) => { setEditTarget(expense); setShowForm(true); };
+  const closeForm = ()        => { setShowForm(false); setEditTarget(null); };
 
-  // ── Multi-select helpers ──────────────────────────────────
   const toggleSelect = (id) => {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -172,7 +193,7 @@ const ExpenseList = () => {
     });
   };
 
-  const toggleAll = () => {
+  const toggleAll  = () => {
     if (selected.size === displayedExpenses.length) setSelected(new Set());
     else setSelected(new Set(displayedExpenses.map((e) => e._id)));
   };
@@ -181,31 +202,23 @@ const ExpenseList = () => {
 
   // ── CSV Export ────────────────────────────────────────────
   const handleExportCSV = () => {
-    if (displayedExpenses.length === 0) {
-      toast.error("No data to export");
-      return;
-    }
+    if (displayedExpenses.length === 0) { toast.error("No data to export"); return; }
     const headers = ["Date", "Description", "Category", "Payment Method", "Amount", "Tags", "Notes"];
     const csvRows = [headers.join(",")];
-    
     for (const exp of displayedExpenses) {
-      const row = [
+      csvRows.push([
         new Date(exp.date).toLocaleDateString("en-CA"),
         `"${(exp.description || "").replace(/"/g, '""')}"`,
         `"${exp.category || ""}"`,
         `"${exp.paymentMethod || ""}"`,
         exp.amount,
         `"${(exp.tags || []).join(", ")}"`,
-        `"${(exp.notes || "").replace(/"/g, '""')}"`
-      ];
-      csvRows.push(row.join(","));
+        `"${(exp.notes || "").replace(/"/g, '""')}"`,
+      ].join(","));
     }
-    
-    const csvContent = "data:text/csv;charset=utf-8," + csvRows.join("\n");
-    const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `expenses_export_${new Date().toISOString().slice(0,10)}.csv`);
+    link.href     = "data:text/csv;charset=utf-8," + encodeURI(csvRows.join("\n"));
+    link.download = `expenses_${new Date().toISOString().slice(0, 10)}.csv`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -236,25 +249,94 @@ const ExpenseList = () => {
         </div>
       </div>
 
-      {/* Filters */}
+      {/* ── Search + Filter Bar ─────────────────────────────── */}
       <div className="filters">
         <div className="search-wrap">
           <SearchIcon />
           <input
             className="search-input" type="search" name="search"
-            placeholder="Search by description, category…"
+            placeholder="Search description…"
             value={filters.search} onChange={handleFilterChange}
           />
         </div>
+
         <select className="filter-select" name="category" value={filters.category} onChange={handleFilterChange}>
           <option value="">All categories</option>
           {EXPENSE_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
+
         <select className="filter-select" name="paymentMethod" value={filters.paymentMethod} onChange={handleFilterChange}>
-          <option value="">All payment methods</option>
-          {PAYMENT_METHODS.map((c) => <option key={c} value={c}>{c}</option>)}
+          <option value="">All methods</option>
+          {PAYMENT_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
         </select>
+
+        {/* Advanced toggle with active-count badge */}
+        <button
+          className={`btn-secondary btn-sm${showAdvanced ? " btn-active" : ""}`}
+          onClick={() => setShowAdvanced((v) => !v)}
+          title="Date & amount filters"
+        >
+          <FilterIcon />
+          {activeFilterCount > 0 && (
+            <span style={{
+              marginLeft: "4px", background: "var(--primary-color)", color: "#fff",
+              borderRadius: "10px", padding: "0 6px", fontSize: "0.7rem", fontWeight: 700,
+            }}>
+              {activeFilterCount}
+            </span>
+          )}
+        </button>
+
+        {activeFilterCount > 0 && (
+          <button className="btn-secondary btn-sm" onClick={handleClearFilters} title="Clear all filters">
+            ✕ Clear
+          </button>
+        )}
       </div>
+
+      {/* ── Advanced Filters Panel ─────────────────────────── */}
+      {showAdvanced && (
+        <div style={{
+          display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+          gap: "0.75rem", padding: "1rem",
+          background: "var(--bg-card)", borderRadius: "10px",
+          border: "1px solid var(--border-color)", marginBottom: "0.5rem",
+        }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+            <label style={{ fontSize: "0.75rem", color: "var(--text-muted)", fontWeight: 600 }}>FROM DATE</label>
+            <input type="date" name="startDate" value={filters.startDate} onChange={handleFilterChange}
+              className="filter-select" style={{ padding: "0.45rem 0.6rem" }} />
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+            <label style={{ fontSize: "0.75rem", color: "var(--text-muted)", fontWeight: 600 }}>TO DATE</label>
+            <input type="date" name="endDate" value={filters.endDate} onChange={handleFilterChange}
+              className="filter-select" style={{ padding: "0.45rem 0.6rem" }} />
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+            <label style={{ fontSize: "0.75rem", color: "var(--text-muted)", fontWeight: 600 }}>MIN AMOUNT (₹)</label>
+            <input type="number" name="minAmount" value={filters.minAmount} onChange={handleFilterChange}
+              placeholder="0" min="0" className="filter-select" style={{ padding: "0.45rem 0.6rem" }} />
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+            <label style={{ fontSize: "0.75rem", color: "var(--text-muted)", fontWeight: 600 }}>MAX AMOUNT (₹)</label>
+            <input type="number" name="maxAmount" value={filters.maxAmount} onChange={handleFilterChange}
+              placeholder="∞" min="0" className="filter-select" style={{ padding: "0.45rem 0.6rem" }} />
+          </div>
+        </div>
+      )}
+
+      {/* ── Active Filter Chips ─────────────────────────────── */}
+      {activeFilterCount > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginBottom: "0.5rem" }}>
+          {debouncedSearch       && <Chip label={`Search: "${debouncedSearch}"`}      onRemove={() => setFilters((p) => ({ ...p, search: "" }))} />}
+          {filters.category      && <Chip label={`Category: ${filters.category}`}     onRemove={() => setFilters((p) => ({ ...p, category: "" }))} />}
+          {filters.paymentMethod && <Chip label={`Method: ${filters.paymentMethod}`}  onRemove={() => setFilters((p) => ({ ...p, paymentMethod: "" }))} />}
+          {filters.startDate     && <Chip label={`From: ${filters.startDate}`}        onRemove={() => setFilters((p) => ({ ...p, startDate: "" }))} />}
+          {filters.endDate       && <Chip label={`To: ${filters.endDate}`}            onRemove={() => setFilters((p) => ({ ...p, endDate: "" }))} />}
+          {filters.minAmount     && <Chip label={`Min: ₹${filters.minAmount}`}        onRemove={() => setFilters((p) => ({ ...p, minAmount: "" }))} />}
+          {filters.maxAmount     && <Chip label={`Max: ₹${filters.maxAmount}`}        onRemove={() => setFilters((p) => ({ ...p, maxAmount: "" }))} />}
+        </div>
+      )}
 
       {/* Sort bar */}
       <div className="sort-bar">
@@ -271,31 +353,19 @@ const ExpenseList = () => {
         {selected.size > 0 && (
           <div className="bulk-toolbar">
             <span>{selected.size} selected</span>
-            <button
-              className="btn-danger btn-sm"
-              onClick={() => setConfirmState({ type: "bulk" })}
-            >
+            <button className="btn-danger btn-sm" onClick={() => setConfirmState({ type: "bulk" })}>
               Delete selected
             </button>
-            <button className="btn-secondary btn-sm" onClick={() => setSelected(new Set())}>
-              Clear
-            </button>
+            <button className="btn-secondary btn-sm" onClick={() => setSelected(new Set())}>Clear</button>
           </div>
         )}
       </div>
 
       {/* List */}
       <div className="expense-list" role="table" aria-label="Expenses">
-
-        {/* Select-all header row */}
         {!isLoading && displayedExpenses.length > 0 && (
           <div className="expense-list__header">
-            <input
-              type="checkbox" className="expense-checkbox"
-              checked={allSelected}
-              onChange={toggleAll}
-              aria-label="Select all"
-            />
+            <input type="checkbox" className="expense-checkbox" checked={allSelected} onChange={toggleAll} aria-label="Select all" />
             <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>Select all</span>
           </div>
         )}
@@ -312,7 +382,7 @@ const ExpenseList = () => {
           <div className="list-state list-state--empty">
             <EmptyIcon />
             <p>No expenses found</p>
-            <span>Try adjusting your filters or add a new expense</span>
+            <span>{activeFilterCount > 0 ? "Try clearing some filters" : "Add a new expense to get started"}</span>
           </div>
         ) : (
           displayedExpenses.map((expense) => (
@@ -334,7 +404,6 @@ const ExpenseList = () => {
         <Pagination currentPage={currentPage} totalPages={totalPages} onPageChange={setCurrentPage} />
       )}
 
-      {/* Expense form modal */}
       {showForm && (
         <ExpenseForm
           initialData={editTarget}
@@ -344,7 +413,6 @@ const ExpenseList = () => {
         />
       )}
 
-      {/* Delete confirm modal */}
       {confirmState && (
         <ConfirmModal
           title={confirmState.type === "bulk" ? `Delete ${selected.size} expense(s)?` : "Delete expense?"}
@@ -358,10 +426,27 @@ const ExpenseList = () => {
   );
 };
 
-// ── Icons ──────────────────────────────────────────────────────
-const PlusIcon   = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>;
-const SearchIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>;
-const EmptyIcon  = () => <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/></svg>;
+// ── Filter Chip ─────────────────────────────────────────────────
+const Chip = ({ label, onRemove }) => (
+  <span style={{
+    display: "inline-flex", alignItems: "center", gap: "4px",
+    padding: "3px 10px", borderRadius: "20px", fontSize: "0.75rem",
+    background: "var(--bg-hover)", color: "var(--text-secondary)",
+    border: "1px solid var(--border-color)", fontWeight: 500,
+  }}>
+    {label}
+    <button
+      onClick={onRemove}
+      style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 0, lineHeight: 1, fontSize: "0.9rem" }}
+    >×</button>
+  </span>
+);
+
+// ── Icons ────────────────────────────────────────────────────────
+const PlusIcon     = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>;
+const SearchIcon   = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>;
+const EmptyIcon    = () => <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/></svg>;
 const DownloadIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>;
+const FilterIcon   = () => <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="4" y1="6" x2="20" y2="6"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="11" y1="18" x2="13" y2="18"/></svg>;
 
 export default ExpenseList;

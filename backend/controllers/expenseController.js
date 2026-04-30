@@ -21,6 +21,37 @@ const calculateNextDate = (date, type) => {
   return d;
 };
 
+// ─── Budget Check Helper ──────────────────────────────────────────────────────
+const Budget = require("../models/Budget");
+
+const checkBudgetFlags = async (userId, expenseCategory, expenseDate, additionalAmount) => {
+  const d = new Date(expenseDate || Date.now());
+  const month = d.getMonth() + 1;
+  const year = d.getFullYear();
+
+  const startDate = new Date(year, month - 1, 1);
+  const endDate = new Date(year, month, 0, 23, 59, 59, 999);
+
+  const [budgets, spendingAgg] = await Promise.all([
+    Budget.find({ user: userId, month, year, category: { $in: ["__overall__", expenseCategory] } }),
+    Expense.aggregate([
+      { $match: { user: userId, date: { $gte: startDate, $lte: endDate } } },
+      { $group: { _id: "$category", spent: { $sum: "$amount" } } }
+    ])
+  ]);
+
+  const overallBudget = budgets.find(b => b.category === "__overall__");
+  const categoryBudget = budgets.find(b => b.category === expenseCategory);
+
+  const totalSpent = spendingAgg.reduce((sum, item) => sum + item.spent, 0);
+  const categorySpent = spendingAgg.find(item => item._id === expenseCategory)?.spent || 0;
+
+  return {
+    isOverBudget: overallBudget ? (totalSpent + additionalAmount > overallBudget.limit) : false,
+    isCategoryExceeded: categoryBudget ? (categorySpent + additionalAmount > categoryBudget.limit) : false,
+  };
+};
+
 // ─── Add Expense ──────────────────────────────────────────────────────────────
 
 const addExpense = async (req, res) => {
@@ -39,6 +70,11 @@ const addExpense = async (req, res) => {
     if (expenseData.isRecurring && expenseData.recurrenceType) {
       expenseData.nextExecutionDate = calculateNextDate(expenseData.date || new Date(), expenseData.recurrenceType);
     }
+
+    // ── Check soft limits ──
+    const flags = await checkBudgetFlags(req.user._id, expenseData.category, expenseData.date, Number(expenseData.amount));
+    expenseData.isOverBudget = flags.isOverBudget;
+    expenseData.isCategoryExceeded = flags.isCategoryExceeded;
 
     const expense = await Expense.create({
       ...expenseData,
@@ -82,15 +118,26 @@ const updateExpense = async (req, res) => {
   }
 
   try {
+    // ── Check soft limits ──
+    const existingExpense = await Expense.findById(req.params.id);
+    if (!existingExpense) return sendError(res, 404, "Expense not found");
+
+    const category = safeUpdate.category || existingExpense.category;
+    const date = safeUpdate.date || existingExpense.date;
+    const newAmount = safeUpdate.amount !== undefined ? Number(safeUpdate.amount) : existingExpense.amount;
+    const amountDifference = newAmount - existingExpense.amount;
+
+    if (amountDifference > 0) {
+      const flags = await checkBudgetFlags(req.user._id, category, date, amountDifference);
+      safeUpdate.isOverBudget = flags.isOverBudget;
+      safeUpdate.isCategoryExceeded = flags.isCategoryExceeded;
+    }
+
     const updatedExpense = await Expense.findOneAndUpdate(
       { _id: req.params.id, user: req.user._id }, // ownership check
       safeUpdate,
       { new: true, runValidators: true }
     );
-
-    if (!updatedExpense) {
-      return sendError(res, 404, "Expense not found");
-    }
 
     return sendSuccess(res, 200, updatedExpense);
   } catch (error) {
@@ -137,20 +184,45 @@ const getExpenses = async (req, res) => {
     }
     // ────────────────────────────────────────────
 
-    const { category, paymentMethod, limit = 20, page = 1 } = req.query;
+    const {
+      category, paymentMethod,
+      search, startDate, endDate,
+      minAmount, maxAmount,
+      limit = 20, page = 1,
+    } = req.query;
 
-    const limitNum = Math.min(Math.max(parseInt(limit) || 20, 1), 100); // clamp: 1–100
+    const limitNum = Math.min(Math.max(parseInt(limit) || 20, 1), 100);
     const pageNum  = Math.max(parseInt(page) || 1, 1);
     const skip     = (pageNum - 1) * limitNum;
 
-    const filter = {
-      user: req.user._id,
-      ...(category && { category }),
-      ...(paymentMethod && { paymentMethod }),
-    };
+    // ─── Dynamic Query Builder ───────────────────────────────────
+    const filter = { user: req.user._id };
+
+    if (search)        filter.description = { $regex: search.trim(), $options: "i" };
+    if (category)      filter.category = category;
+    if (paymentMethod) filter.paymentMethod = paymentMethod;
+
+    if (startDate || endDate) {
+      filter.date = {};
+      if (startDate) {
+        const d = new Date(startDate);
+        if (!isNaN(d)) filter.date.$gte = d;
+      }
+      if (endDate) {
+        const d = new Date(endDate);
+        if (!isNaN(d)) { d.setHours(23, 59, 59, 999); filter.date.$lte = d; }
+      }
+    }
+
+    if (minAmount || maxAmount) {
+      filter.amount = {};
+      if (minAmount && !isNaN(Number(minAmount))) filter.amount.$gte = Number(minAmount);
+      if (maxAmount && !isNaN(Number(maxAmount))) filter.amount.$lte = Number(maxAmount);
+    }
+    // ─────────────────────────────────────────────────────────────
 
     const [expenses, total] = await Promise.all([
-      Expense.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limitNum),
+      Expense.find(filter).sort({ date: -1 }).skip(skip).limit(limitNum),
       Expense.countDocuments(filter),
     ]);
 
@@ -330,6 +402,116 @@ const getMonthlySummary = async (req, res) => {
   }
 };
 
+// ─── Get Spending Trends ──────────────────────────────────────────────────────
+
+const getSpendingTrends = async (req, res) => {
+  try {
+    const { range, groupBy = "day", startDate, endDate } = req.query;
+
+    let start = new Date();
+    let end = new Date();
+
+    // 1. Determine Date Range
+    if (range === "7d") {
+      start.setDate(start.getDate() - 7);
+    } else if (range === "30d") {
+      start.setDate(start.getDate() - 30);
+    } else if (range === "90d") {
+      start.setDate(start.getDate() - 90);
+    } else if (range === "1y") {
+      start.setFullYear(start.getFullYear() - 1);
+    } else if (range === "custom" && startDate && endDate) {
+      start = new Date(startDate);
+      end = new Date(endDate);
+    } else {
+      start.setDate(start.getDate() - 30);
+    }
+
+    start.setHours(0, 0, 0, 0);
+    end.setHours(23, 59, 59, 999);
+
+    // 2. Build Grouping Stage
+    let groupFormat = "%Y-%m-%d";
+    if (groupBy === "month") groupFormat = "%Y-%m";
+    else if (groupBy === "year") groupFormat = "%Y";
+
+    const pipeline = [
+      { $match: { user: req.user._id, date: { $gte: start, $lte: end } } }
+    ];
+
+    if (groupBy === "week") {
+      pipeline.push({
+        $group: {
+          _id: { year: { $isoWeekYear: "$date" }, week: { $isoWeek: "$date" } },
+          total: { $sum: "$amount" },
+          date: { $min: "$date" }
+        }
+      }, {
+        $project: {
+          _id: 0,
+          label: { $concat: ["W", { $toString: "$_id.week" }, "-", { $toString: "$_id.year" }] },
+          total: { $round: ["$total", 2] },
+          sortDate: "$date"
+        }
+      });
+    } else {
+      pipeline.push({
+        $group: {
+          _id: { $dateToString: { format: groupFormat, date: "$date" } },
+          total: { $sum: "$amount" },
+          date: { $min: "$date" }
+        }
+      }, {
+        $project: {
+          _id: 0,
+          label: "$_id",
+          total: { $round: ["$total", 2] },
+          sortDate: "$date"
+        }
+      });
+    }
+
+    pipeline.push({ $sort: { sortDate: 1 } });
+
+    // ─── Calculate Previous Period for Comparison ───
+    const durationMs = end.getTime() - start.getTime();
+    const prevStart = new Date(start.getTime() - durationMs - 1);
+    const prevEnd = new Date(start.getTime() - 1);
+
+    const [trends, prevTotalAgg] = await Promise.all([
+      Expense.aggregate(pipeline),
+      Expense.aggregate([
+        { $match: { user: req.user._id, date: { $gte: prevStart, $lte: prevEnd } } },
+        { $group: { _id: null, total: { $sum: "$amount" } } }
+      ])
+    ]);
+
+    const totalSpentInRange = trends.reduce((sum, item) => sum + item.total, 0);
+    const prevTotal = prevTotalAgg[0]?.total ?? 0;
+    const changePct = prevTotal > 0 ? ((totalSpentInRange - prevTotal) / prevTotal) * 100 : 0;
+
+    let highest = { label: "N/A", total: 0 };
+    if (trends.length > 0) {
+      highest = trends.reduce((prev, curr) => (prev.total > curr.total ? prev : curr));
+    }
+
+    return sendSuccess(res, 200, {
+      trends,
+      insights: {
+        totalSpent: Math.round(totalSpentInRange * 100) / 100,
+        averagePerPoint: Math.round((totalSpentInRange / (trends.length || 1)) * 100) / 100,
+        highestPoint: highest,
+        changeVsLastPeriod: Math.round(changePct * 10) / 10,
+        prevTotal: Math.round(prevTotal * 100) / 100,
+      }
+    });
+  } catch (error) {
+    console.error("[getSpendingTrends]", error);
+    return sendError(res, 500, "Failed to fetch spending trends");
+  }
+};
+
+
 // ─── Exports ──────────────────────────────────────────────────────────────────
 
 module.exports = {
@@ -340,4 +522,5 @@ module.exports = {
   getTotalExpenses,
   getExpensesByCategory,
   getMonthlySummary,
+  getSpendingTrends,
 };

@@ -94,6 +94,16 @@ const expenseSchema = new mongoose.Schema(
       trim: true,
       maxlength: [1000, "Notes cannot exceed 1000 characters"],
     },
+
+    // ── Budget soft-flag fields (informational only, never block) ──
+    isOverBudget: {
+      type: Boolean,
+      default: false,
+    },
+    isCategoryExceeded: {
+      type: Boolean,
+      default: false,
+    },
   },
   {
     timestamps: true,

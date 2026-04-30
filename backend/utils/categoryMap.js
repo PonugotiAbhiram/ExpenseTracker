@@ -1,5 +1,5 @@
 const categoryMap = {
-  "Food & Dining": ["starbucks", "restaurant", "cafe", "pizza", "burger", "supermarket", "grocery", "dmart", "swiggy", "zomato", "mcdonalds", "kfc", "food"],
+  "Food & Dining": ["starbucks", "restaurant", "cafe", "pizza", "burger", "supermarket", "grocery", "dmart", "swiggy", "zomato", "mcdonalds", "kfc", "food", "coffee"],
   "Transportation": ["uber", "ola", "bus", "taxi", "metro", "fuel", "petrol", "diesel", "gas", "toll", "parking"],
   "Travel": ["flight", "hotel", "airbnb", "train", "makemytrip", "booking", "agoda", "vacation"],
   "Entertainment": ["netflix", "movie", "spotify", "prime", "cinema", "game", "steam", "concert", "music", "hotstar"],

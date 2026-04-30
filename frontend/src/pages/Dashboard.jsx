@@ -9,6 +9,7 @@ import Navbar          from "../components/Navbar";
 import ExpenseChart    from "../components/ExpenseChart";
 import MonthlyBarChart from "../components/MonthlyBarChart";
 import ExpenseForm     from "../components/ExpenseForm";
+import BudgetPanel     from "../components/BudgetPanel";
 import { toast }       from "../utils/toast";
 
 // ── Stat card ─────────────────────────────────────────────────
@@ -45,7 +46,7 @@ const CAT_COLORS = {
   "Other":          "#94a3b8",
 };
 
-const MONTHLY_BUDGET = 50000;
+
 
 // ── Dashboard ─────────────────────────────────────────────────
 const Dashboard = () => {
@@ -96,8 +97,9 @@ const Dashboard = () => {
   const handleCreateExpense = async (data) => {
     setFormLoading(true);
     try {
-      await createExpense(data);
-      toast.success("Expense added successfully!");
+      const res = await createExpense(data);
+      const isOver = res?.data?.isOverBudget || res?.data?.isCategoryExceeded;
+      toast.success(isOver ? "Expense added (over budget) ⚠️" : "Expense added successfully!");
       setShowForm(false);
       load();
     } catch (err) {
@@ -115,17 +117,10 @@ const Dashboard = () => {
   // 2. This Month
   const thisMonth = stats?.thisMonth ?? 0;
 
-  // 3. Budget Left
-  const budgetLeft = Math.max(MONTHLY_BUDGET - thisMonth, 0);
-
   // 4. Daily Spend — with projected monthly spend as subtitle
   const dayOfMonth   = new Date().getDate();
   const dailyAvg     = thisMonth ? thisMonth / dayOfMonth : 0;
   const projectedMo  = dailyAvg * 30;
-
-  // 5. Savings Rate — % of budget not spent this month
-  const savingsRate  = Math.round((budgetLeft / MONTHLY_BUDGET) * 100);
-  const savingsColor = savingsRate >= 40 ? "#22c55e" : savingsRate >= 20 ? "#f59e0b" : "#ef4444";
 
   // 6. Spending Trend — this month vs last month
   const lastMonthTotal = monthlyData.length >= 2
@@ -169,43 +164,7 @@ const Dashboard = () => {
           </div>
         </header>
 
-        {/* ── Budget Banner ── */}
-        <div className="budget-banner" style={{ 
-          background: "linear-gradient(135deg, var(--accent) 0%, #818cf8 100%)", 
-          borderRadius: "var(--radius-lg)", 
-          padding: "1.5rem 2rem", 
-          marginBottom: "2rem",
-          color: "#fff",
-          boxShadow: "var(--shadow-md)",
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center"
-        }}>
-          <div>
-            <h3 style={{ fontSize: "1.1rem", fontWeight: "600", marginBottom: "0.25rem", color: "#ffffff" }}>
-              Monthly Budget Progress
-            </h3>
-            <p style={{ fontSize: "0.875rem", opacity: 0.9 }}>
-              You have used{" "}
-              <strong>{thisMonth ? Math.round((thisMonth / MONTHLY_BUDGET) * 100) : 0}%</strong>{" "}
-              of your ₹{(MONTHLY_BUDGET / 1000).toFixed(0)}k budget.
-              {projectedMo > 0 && (
-                <span style={{ marginLeft: "0.5rem", opacity: 0.8 }}>
-                  · Projected: {formatCurrency(projectedMo)}/mo
-                </span>
-              )}
-            </p>
-          </div>
-          <div style={{ width: "30%", background: "rgba(255,255,255,0.2)", height: "8px", borderRadius: "99px", overflow: "hidden" }}>
-            <div style={{
-              height: "100%",
-              width: `${Math.min((thisMonth / MONTHLY_BUDGET) * 100, 100)}%`,
-              background: thisMonth > MONTHLY_BUDGET * 0.8 ? "#fca5a5" : "#ffffff",
-              borderRadius: "99px",
-              transition: "width 0.6s ease"
-            }} />
-          </div>
-        </div>
+
 
         {/* ── KPI Cards (8 high-signal) ── */}
         <div className="stats-grid">
@@ -230,14 +189,14 @@ const Dashboard = () => {
             sub={`Day ${dayOfMonth} of ${new Date(new Date().getFullYear(), new Date().getMonth()+1, 0).getDate()}`}
           />
 
-          {/* 3. Budget Left */}
+          {/* 3. Transactions this month */}
           <StatCard
-            label="Budget Left"
-            value={formatCurrency(budgetLeft)}
+            label="Transactions"
+            value={stats?.count ?? 0}
             accent="#22c55e"
             loading={loading}
             icon={<SafeIcon />}
-            sub={budgetLeft === 0 ? "Budget exceeded" : `of ₹${(MONTHLY_BUDGET/1000).toFixed(0)}k limit`}
+            sub="all time"
           />
 
           {/* 4. Daily Spend + projected */}
@@ -250,14 +209,14 @@ const Dashboard = () => {
             sub={projectedMo > 0 ? `~${formatCurrency(projectedMo)} projected` : "no data yet"}
           />
 
-          {/* 5. Savings Rate */}
+          {/* 5. Avg per transaction */}
           <StatCard
-            label="Savings Rate"
-            value={`${savingsRate}%`}
-            accent={savingsColor}
+            label="Avg Transaction"
+            value={stats?.count ? formatCurrency((stats?.total ?? 0) / stats.count) : "—"}
+            accent="#8b5cf6"
             loading={loading}
             icon={<ShieldIcon />}
-            sub={savingsRate >= 40 ? "On track 🎯" : savingsRate >= 20 ? "Watch spending" : "Over budget ⚠️"}
+            sub="all-time average"
           />
 
           {/* 6. Spending Trend */}
@@ -291,6 +250,9 @@ const Dashboard = () => {
           />
 
         </div>
+
+        {/* ── Budget Panel ── */}
+        <BudgetPanel />
 
         {/* ── Charts row ── */}
         <div className="charts-grid">

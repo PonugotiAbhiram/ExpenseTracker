@@ -10,7 +10,8 @@ const {
   updateExpense,
   getTotalExpenses,
   getExpensesByCategory,
-  getMonthlySummary
+  getMonthlySummary,
+  getSpendingTrends
 
 } = require("../controllers/expenseController");
 
@@ -23,6 +24,7 @@ const expenseRules = [
 router.get("/total", protect, getTotalExpenses);
 router.get("/category", protect, getExpensesByCategory);
 router.get("/monthly", protect, getMonthlySummary);
+router.get("/trends",  protect, getSpendingTrends);
 
 router.get("/", protect, getExpenses);
 

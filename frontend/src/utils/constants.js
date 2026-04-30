@@ -51,5 +51,6 @@ export const ROUTES = {
   REGISTER: "/register",
   DASHBOARD: "/dashboard",
   EXPENSES: "/expenses",
+  ANALYTICS: "/analytics",
   FORGOT_PASSWORD: "/forgot-password",
 };

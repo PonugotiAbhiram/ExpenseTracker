@@ -64,6 +64,15 @@ export const getCategoryData = async () => {
 };
 
 /**
+ * Returns { trends, insights }
+ */
+export const getSpendingTrends = async (params = {}) => {
+  const query = new URLSearchParams(params).toString();
+  const res = await get(`/expenses/trends?${query}`);
+  return res?.data ?? { trends: [], insights: {} };
+};
+
+/**
  * Returns array of { year, month, total, count }
  */
 export const getMonthlyData = async () => {
