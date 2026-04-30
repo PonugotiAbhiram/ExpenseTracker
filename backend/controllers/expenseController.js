@@ -307,6 +307,7 @@ const getTotalExpenses = async (req, res) => {
           $group: {
             _id: null,
             thisMonth: { $sum: "$amount" },
+            thisMonthCount: { $sum: 1 },
           },
         },
       ]),
@@ -315,7 +316,8 @@ const getTotalExpenses = async (req, res) => {
     return sendSuccess(res, 200, {
       total: overall[0]?.total ?? 0,
       count: overall[0]?.count ?? 0,
-      thisMonth: monthly[0]?.thisMonth ?? 0, 
+      thisMonth: monthly[0]?.thisMonth ?? 0,
+      thisMonthCount: monthly[0]?.thisMonthCount ?? 0,
     });
 
   } catch (error) {

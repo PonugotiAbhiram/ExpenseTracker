@@ -1,139 +1,154 @@
-import React from "react";
-import { useMemo } from "react";
-import { formatCurrency } from "../utils/formatDate";
+import React, { useState, useMemo } from "react";
 import {
-  PieChart,
-  Pie,
-  Cell,
-  Tooltip,
-  ResponsiveContainer,
-  Legend,
+  PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid
 } from "recharts";
-const COLORS = ["#534AB7", "#1D9E75", "#D85A30", "#D4537E", "#378ADD"];
-const getColor = (index) =>
-  COLORS[index % COLORS.length];
+import { formatCurrency } from "../utils/formatDate";
 
-const RADIAN = Math.PI / 180;
+const COLORS = ["#6366f1", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#06b6d4", "#f97316"];
 
-const renderCustomLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent }) => {
-  if (percent < 0.05) return null; // hide labels on tiny slices
-  const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
-  const x = cx + radius * Math.cos(-midAngle * RADIAN);
-  const y = cy + radius * Math.sin(-midAngle * RADIAN);
-  return (
-    <text x={x} y={y} fill="#fff" textAnchor="middle" dominantBaseline="central" fontSize={12} fontWeight={500}>
-      {`${(percent * 100).toFixed(0)}%`}
-    </text>
-  );
-};
-
+// ── Custom Tooltip ────────────────────────────────────────────
 const CustomTooltip = ({ active, payload, totalAmount }) => {
   if (!active || !payload?.length) return null;
   const { name, value } = payload[0];
-  const pct = totalAmount
-  ? ((value / totalAmount) * 100).toFixed(1)
-  : 0;
+  const pct = totalAmount ? ((value / totalAmount) * 100).toFixed(1) : 0;
+  
   return (
     <div style={{
-      background: "var(--bg-surface)",
-      border: "0.5px solid var(--border)",
-      borderRadius: 8,
+      background: "var(--bg-elevated)",
+      border: "1px solid var(--border)",
+      borderRadius: 10,
       padding: "10px 14px",
+      boxShadow: "var(--shadow-md)",
       fontSize: 13,
     }}>
-      <p style={{ fontWeight: 500, marginBottom: 4 }}>{name}</p>
-      <p style={{ color:"var(--text-secondary)" }}>
+      <p style={{ fontWeight: 700, marginBottom: 4, color: "var(--text-primary)" }}>{name}</p>
+      <p style={{ color: "var(--text-secondary)", margin: 0 }}>
         {formatCurrency(value)} &nbsp;·&nbsp; {pct}%
       </p>
     </div>
   );
 };
 
-const EmptyState = () => (
-  <div style={{ textAlign: "center", padding: "3rem 1rem", color: "var(--color-text-tertiary)", fontSize: 14 }}>
-    No expense data to display
-  </div>
-);
+// ── Main Component ───────────────────────────────────────────
+const ExpenseChart = ({ data = [], title }) => {
+  const [view, setView] = useState("distribution");
 
-const ExpenseChart = ({ data = [] }) => {
-  const totalAmount = useMemo(
-  () =>
-    data.reduce((sum, item) => {
-      const value =
-        typeof item.total === "number"
-          ? item.total
-          : Number(item.total?.amount || item.total || 0);
+  const totalAmount = useMemo(() => 
+    data.reduce((sum, item) => sum + (Number(item.total) || 0), 0)
+  , [data]);
 
-      return sum + value;
-    }, 0),
-  [data]
-);
+  const sortedData = useMemo(() => 
+    [...data].sort((a, b) => b.total - a.total)
+  , [data]);
 
-const sortedData = useMemo(
-  () => [...data].sort((a, b) => b.total - a.total),
-  [data]
-);
-
-const topCategory = sortedData[0];
-
-  if (!data.length) return <EmptyState />;
+  if (!data.length) {
+    return (
+      <div style={{ textAlign: "center", padding: "4rem 1rem", color: "var(--text-muted)", fontSize: 14 }}>
+        Add expenses to view category insights
+      </div>
+    );
+  }
 
   return (
-    <div style={{ width: "100%" }}>
+    <div className="chart-container">
+      {/* ── Header with Title + Toggle ── */}
       <div style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
-        gap: 10,
-        marginBottom: "1.25rem",
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        marginBottom: "1.5rem"
       }}>
-        {[
-          { label: "Total spent", value: formatCurrency(totalAmount) },
-          { label: "Categories", value: data.length },
-          { label: "Top category", value: topCategory?.category ?? "—" },
-        ].map(({ label, value }) => (
-          <div key={label} style={{
-            background: "var(--color-background-secondary)",
-            borderRadius: 8,
-            padding: "0.85rem 1rem",
-          }}>
-            <p style={{ fontSize: 12, color: "var(--color-text-secondary)", marginBottom: 4 }}>{label}</p>
-            <p style={{ fontSize: 18, fontWeight: 500 }}>{value}</p>
-          </div>
-        ))}
+        <h3 className="section-title" style={{ margin: 0 }}>{title}</h3>
+        
+        <div style={{
+          display: "flex",
+          gap: 4,
+          background: "var(--bg-elevated)",
+          padding: 3,
+          borderRadius: 8,
+          border: "1px solid var(--border)",
+        }}>
+          {["distribution", "comparison"].map((v) => (
+            <button
+              key={v}
+              onClick={() => setView(v)}
+              style={{
+                padding: "4px 10px",
+                fontSize: 11,
+                fontWeight: 700,
+                textTransform: "capitalize",
+                borderRadius: 6,
+                border: "none",
+                cursor: "pointer",
+                transition: "all 0.2s",
+                background: view === v ? "var(--bg-hover)" : "transparent",
+                color: view === v ? "var(--accent)" : "var(--text-muted)",
+                boxShadow: view === v ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
+              }}
+            >
+              {v}
+            </button>
+          ))}
+        </div>
       </div>
 
-      <ResponsiveContainer width="100%" height={280}>
-        <PieChart role="img" aria-label="Expense distribution chart">
-          <Pie
-            data={data}
-            dataKey="total"
-            nameKey="category"
-            cx="50%"
-            cy="50%"
-            innerRadius={60}
-            outerRadius={110}
-            paddingAngle={2}
-            labelLine={false}
-            label={renderCustomLabel}
-          >
-            {data.map((_, index) => (
-              <Cell
-                key={`cell-${index}`}
-                fill={COLORS[index % COLORS.length]}
-                stroke="transparent"
+      <div style={{ height: 280 }} className="fade-in">
+        <ResponsiveContainer width="100%" height="100%">
+          {view === "distribution" ? (
+            <PieChart>
+              <Pie
+                data={sortedData}
+                dataKey="total"
+                nameKey="category"
+                cx="50%" cy="50%"
+                innerRadius={65}
+                outerRadius={95}
+                paddingAngle={4}
+                stroke="none"
+              >
+                {sortedData.map((_, index) => (
+                  <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                ))}
+              </Pie>
+              <Tooltip content={<CustomTooltip totalAmount={totalAmount} />} />
+              <Legend 
+                verticalAlign="bottom" 
+                iconType="circle" 
+                iconSize={8} 
+                wrapperStyle={{ fontSize: 11, fontWeight: 600, paddingTop: 10 }} 
               />
-            ))}
-          </Pie>
-          <Tooltip content={<CustomTooltip totalAmount={totalAmount} />} />
-          <Legend
-            iconType="square"
-            iconSize={10}
-            formatter={(value) => (
-              <span style={{ fontSize: 13, color: "var(--color-text-primary)" }}>{value}</span>
-            )}
-          />
-        </PieChart>
-      </ResponsiveContainer>
+            </PieChart>
+          ) : (
+            <BarChart
+              layout="vertical"
+              data={sortedData.slice(0, 5)}
+              margin={{ left: 0, right: 30, top: 10, bottom: 0 }}
+            >
+              <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="var(--border)" opacity={0.3} />
+              <XAxis type="number" hide />
+              <YAxis 
+                dataKey="category" 
+                type="category" 
+                axisLine={false} 
+                tickLine={false} 
+                tick={{ fill: "var(--text-primary)", fontSize: 11, fontWeight: 700 }}
+                width={100}
+              />
+              <Tooltip cursor={{ fill: "var(--bg-hover)", opacity: 0.4 }} content={<CustomTooltip totalAmount={totalAmount} />} />
+              <Bar 
+                dataKey="total" 
+                radius={[0, 4, 4, 0]} 
+                barSize={18}
+              >
+                {sortedData.slice(0, 5).map((_, index) => (
+                  <Cell key={`bar-cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                ))}
+              </Bar>
+            </BarChart>
+          )}
+        </ResponsiveContainer>
+      </div>
     </div>
   );
 };
